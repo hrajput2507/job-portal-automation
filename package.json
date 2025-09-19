@@ -1,0 +1,32 @@
+{
+  "name": "instahyre-auto-apply",
+  "version": "1.0.0",
+  "description": "Automated job application script for Instahyre using Playwright",
+  "main": "instahyre-auto-apply.ts",
+  "scripts": {
+    "start": "npx ts-node instahyre-auto-apply.ts",
+    "build": "tsc instahyre-auto-apply.ts",
+    "install-browsers": "npx playwright install chromium",
+    "dev": "npx ts-node --watch instahyre-auto-apply.ts"
+  },
+  "keywords": [
+    "instahyre",
+    "job-application",
+    "automation",
+    "playwright",
+    "typescript"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.40.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "ts-node": "^10.9.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
