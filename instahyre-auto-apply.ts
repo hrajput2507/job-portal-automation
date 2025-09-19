@@ -30,6 +30,7 @@ class InstahyreAutoApply {
   private appliedCount = 0;
   private failedCount = 0;
   private config: Config;
+  private hasClickedView = false;
 
   constructor() {
     this.config = this.loadConfig();
@@ -377,9 +378,50 @@ class InstahyreAutoApply {
     if (!this.page) return 0;
     let applied = 0;
 
-    console.log("🔍 Looking for Apply buttons directly...");
+    console.log("🔍 Looking for View button (first time only)...");
 
-    // Keep applying until no more Apply buttons are found
+    // First time only: click View button to open job details
+    if (!this.hasClickedView) {
+      try {
+        // Dismiss any blocking overlays before clicking
+        await this.dismissOverlays().catch(() => {});
+        await this.closeModal().catch(() => {});
+
+        const viewButtons = await this.page.$$(
+          'button.button-interested.btn.btn-success, #interested-btn, button:has-text("View")'
+        );
+        console.log(`🔍 Found ${viewButtons.length} View buttons`);
+
+        if (viewButtons.length > 0) {
+          const firstViewBtn = viewButtons[0];
+          const isVisible = await firstViewBtn.isVisible();
+          const isEnabled = await firstViewBtn.isEnabled();
+
+          if (isVisible && isEnabled) {
+            console.log("🎯 Clicking View button (first time only)...");
+            try {
+              await firstViewBtn.scrollIntoViewIfNeeded();
+              await firstViewBtn.click({ timeout: 500 });
+            } catch {
+              try {
+                await firstViewBtn.click({ force: true, timeout: 500 });
+              } catch {
+                await firstViewBtn.evaluate((el: any) => el.click());
+              }
+            }
+            console.log("✅ Clicked View button (first time)");
+            this.hasClickedView = true;
+            await this.page.waitForTimeout(500);
+          }
+        }
+      } catch (error) {
+        console.log("❌ Failed during View click:", error);
+      }
+    }
+
+    console.log("🔍 Now clicking Apply buttons recursively...");
+
+    // Keep clicking Apply buttons until no more are found
     let maxAttempts = 50; // Safety limit
     let attempts = 0;
 
@@ -387,120 +429,133 @@ class InstahyreAutoApply {
       attempts++;
       console.log(`🔄 Apply attempt ${attempts}/${maxAttempts}`);
 
-      // Look for first Apply button (primary)
-      const firstApplySelectors = [
-        "button.btn.btn-lg.btn-primary.new-btn",
-        "button.btn-primary",
-        'button:has-text("Apply"):not(.btn-success)',
-      ];
+      // Look for Apply buttons and click them
+      const foundApply = await this.clickApplyButtonsRecursively();
 
-      let foundApplyButton = false;
-      for (const selector of firstApplySelectors) {
-        try {
-          const btn = await this.page.$(selector);
-          if (btn) {
-            const isVisible = await btn.isVisible();
-            const isEnabled = await btn.isEnabled();
-
-            if (isVisible && isEnabled) {
-              console.log(`🎯 Found first Apply button: ${selector}`);
-
-              // Click first Apply button
-              try {
-                await btn.scrollIntoViewIfNeeded();
-                await btn.click({ timeout: 1000 });
-                console.log("✅ Clicked first Apply button (normal)");
-                foundApplyButton = true;
-              } catch (error1) {
-                try {
-                  await btn.click({ force: true, timeout: 1000 });
-                  console.log("✅ Clicked first Apply button (force)");
-                  foundApplyButton = true;
-                } catch (error2) {
-                  try {
-                    await btn.evaluate((el: any) => el.click());
-                    console.log("✅ Clicked first Apply button (JavaScript)");
-                    foundApplyButton = true;
-                  } catch (error3) {
-                    console.log(
-                      `❌ Failed to click first Apply button: ${selector}`
-                    );
-                    continue;
-                  }
-                }
-              }
-
-              // Wait for second Apply button to appear
-              console.log("⏳ Waiting for second Apply button...");
-              await this.page.waitForTimeout(1000);
-
-              // Look for second Apply button
-              const secondBtn = await this.page.$(
-                'button.btn.btn-lg.btn-success[ng-click="applyBulk()"]'
-              );
-              if (secondBtn) {
-                const secondVisible = await secondBtn.isVisible();
-                const secondEnabled = await secondBtn.isEnabled();
-
-                if (secondVisible && secondEnabled) {
-                  console.log("🎯 Found second Apply button, clicking...");
-                  try {
-                    await secondBtn.click({ timeout: 1000 });
-                    console.log("✅ Clicked second Apply button (normal)");
-                  } catch (error) {
-                    try {
-                      await secondBtn.click({ force: true, timeout: 1000 });
-                      console.log("✅ Clicked second Apply button (force)");
-                    } catch (error2) {
-                      await secondBtn.evaluate((el: any) => el.click());
-                      console.log(
-                        "✅ Clicked second Apply button (JavaScript)"
-                      );
-                    }
-                  }
-                } else {
-                  console.log("⚠️ Second Apply button found but not clickable");
-                }
-              } else {
-                console.log("⚠️ No second Apply button found");
-              }
-
-              applied++;
-              break;
-            }
-          }
-        } catch (error) {
-          // Continue to next selector
-        }
-      }
-
-      if (!foundApplyButton) {
+      if (foundApply) {
+        applied++;
+      } else {
         console.log("❌ No more Apply buttons found, stopping...");
         break;
       }
-
-      // Close any popups or modals that might have appeared
-      try {
-        const closeBtn = await this.page.$(
-          'button:has-text("Close"), .close, .btn-close, [aria-label="Close"]'
-        );
-        if (closeBtn) {
-          await closeBtn.click().catch(() => {});
-          console.log("✅ Closed popup/modal");
-        }
-
-        // Also try pressing Escape key
-        await this.page.keyboard.press("Escape").catch(() => {});
-      } catch (error) {
-        // Ignore close errors
-      }
-
-      // Wait a bit between applications
-      await this.page.waitForTimeout(200);
     }
 
     console.log(`📊 Applied to ${applied} jobs total`);
     return applied;
+  }
+
+  private async clickApplyButtonsRecursively(): Promise<boolean> {
+    if (!this.page) return false;
+
+    // Look for first Apply button (primary)
+    const firstApplySelectors = [
+      "button.btn.btn-lg.btn-primary.new-btn",
+      "button.btn-primary",
+      'button:has-text("Apply"):not(.btn-success)',
+    ];
+
+    let foundApplyButton = false;
+    for (const selector of firstApplySelectors) {
+      try {
+        const btn = await this.page.$(selector);
+        if (btn) {
+          const isVisible = await btn.isVisible();
+          const isEnabled = await btn.isEnabled();
+
+          if (isVisible && isEnabled) {
+            console.log(`🎯 Found first Apply button: ${selector}`);
+
+            // Click first Apply button
+            try {
+              await btn.scrollIntoViewIfNeeded();
+              await btn.click({ timeout: 500 });
+              console.log("✅ Clicked first Apply button (normal)");
+              foundApplyButton = true;
+            } catch (error1) {
+              try {
+                await btn.click({ force: true, timeout: 500 });
+                console.log("✅ Clicked first Apply button (force)");
+                foundApplyButton = true;
+              } catch (error2) {
+                try {
+                  await btn.evaluate((el: any) => el.click());
+                  console.log("✅ Clicked first Apply button (JavaScript)");
+                  foundApplyButton = true;
+                } catch (error3) {
+                  console.log(
+                    `❌ Failed to click first Apply button: ${selector}`
+                  );
+                  continue;
+                }
+              }
+            }
+
+            // Wait for second Apply button to appear
+            console.log("⏳ Waiting for second Apply button...");
+            await this.page.waitForTimeout(500);
+
+            // Look for second Apply button
+            const secondBtn = await this.page.$(
+              'button.btn.btn-lg.btn-success[ng-click="applyBulk()"]'
+            );
+            if (secondBtn) {
+              const secondVisible = await secondBtn.isVisible();
+              const secondEnabled = await secondBtn.isEnabled();
+
+              if (secondVisible && secondEnabled) {
+                console.log("🎯 Found second Apply button, clicking...");
+                try {
+                  await secondBtn.click({ timeout: 500 });
+                  console.log("✅ Clicked second Apply button (normal)");
+                } catch (error) {
+                  try {
+                    await secondBtn.click({ force: true, timeout: 500 });
+                    console.log("✅ Clicked second Apply button (force)");
+                  } catch (error2) {
+                    await secondBtn.evaluate((el: any) => el.click());
+                    console.log("✅ Clicked second Apply button (JavaScript)");
+                  }
+                }
+              } else {
+                console.log("⚠️ Second Apply button found but not clickable");
+              }
+            } else {
+              console.log("⚠️ No second Apply button found");
+            }
+
+            break;
+          }
+        }
+      } catch (error) {
+        // Continue to next selector
+      }
+    }
+
+    if (!foundApplyButton) {
+      console.log("❌ No Apply button found");
+      return false;
+    }
+
+    // Close any popups or modals that might have appeared
+    try {
+      const closeBtn = await this.page.$(
+        'button:has-text("Close"), .close, .btn-close, [aria-label="Close"]'
+      );
+      if (closeBtn) {
+        await closeBtn.click().catch(() => {});
+        console.log("✅ Closed popup/modal");
+      }
+
+      // Also try pressing Escape key
+      await this.page.keyboard.press("Escape").catch(() => {});
+    } catch (error) {
+      // Ignore close errors
+    }
+
+    // Wait a bit before next iteration
+    await this.page.waitForTimeout(100);
+
+    return true; // Successfully found and clicked Apply button
   }
 
   private async clickApplyButtonInModal(): Promise<boolean> {
